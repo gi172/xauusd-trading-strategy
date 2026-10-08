@@ -1,22 +1,22 @@
 //@version=5
-strategy("XAUUSD 1H Intraday - Touch S/R Visual", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.04)
+strategy("XAUUSD 1H - Touch S/R with Direction Logic", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.04)
 
 // =========================
 // INPUTS
 // =========================
-lookback = input.int(40, "Support/Resistance Lookback", minval=10, maxval=200)
+lookback = input.int(40, "Lookback for S/R", minval=10, maxval=200)
+trendLookback = input.int(20, "Trend Structure Lookback", minval=5, maxval=100)
 fastEma = input.int(20, "Fast EMA", minval=5, maxval=100)
 slowEma = input.int(50, "Slow EMA", minval=10, maxval=200)
-trendLookback = input.int(20, "Trend Structure Lookback", minval=5, maxval=100)
 rsiLen = input.int(14, "RSI Length", minval=5, maxval=50)
 atrLen = input.int(14, "ATR Length", minval=5, maxval=50)
-slAtrMult = input.float(1.5, "Stop Loss ATR Multiplier", minval=0.5, maxval=10.0, step=0.1)
-tpAtrMult = input.float(2.0, "Take Profit ATR Multiplier", minval=0.5, maxval=20.0, step=0.1)
-touchRange = input.float(0.3, "Touch Range % of ATR", minval=0.1, maxval=1.0, step=0.1)
+slAtrMult = input.float(1.5, "SL ATR Multiplier", minval=0.5, maxval=10.0, step=0.1)
+tpAtrMult = input.float(2.0, "TP ATR Multiplier", minval=0.5, maxval=20.0, step=0.1)
+touchRange = input.float(0.25, "Touch Tolerance ATR %", minval=0.1, maxval=1.5, step=0.05)
+showLevels = input.bool(true, "Show S/R Levels")
+showTouchCandles = input.bool(true, "Highlight Touch Candles")
 allowLongs = input.bool(true, "Allow Longs")
 allowShorts = input.bool(true, "Allow Shorts")
-showLevels = input.bool(true, "Show S/R levels")
-showTouchCandels = input.bool(true, "Highlight Touch Candels")
 
 // =========================
 // SERIES
@@ -34,94 +34,86 @@ lastLow = ta.lowest(low, trendLookback)
 prevLastHigh = ta.highest(high[1], trendLookback)
 prevLastLow = ta.lowest(low[1], trendLookback)
 
-// =========================
-// TOUCH DETECTION
-// =========================
-touchTolerance = atrValue * touchRange
-
-touchSupport = (low <= supportLevel + touchTolerance) and (low >= supportLevel - touchTolerance)
-touchResistance = (high >= resistanceLevel - touchTolerance) and (high <= resistanceLevel + touchTolerance)
-
 bullTrend = close > emaFast and emaFast > emaSlow and lastHigh > prevLastHigh
 bearTrend = close < emaFast and emaFast < emaSlow and lastLow < prevLastLow
 
-nearSupport = close <= supportLevel + atrValue * 0.35 and close >= supportLevel - atrValue * 0.10
-nearResistance = close >= resistanceLevel - atrValue * 0.35 and close <= resistanceLevel + atrValue * 0.10
+touchTol = atrValue * touchRange
 
-longCondition = allowLongs and bullTrend and nearSupport and rsiValue > 55 and close > emaFast and touchSupport
-shortCondition = allowShorts and bearTrend and nearResistance and rsiValue < 45 and close < emaFast and touchResistance
+touchSupport = low <= supportLevel + touchTol and low >= supportLevel - touchTol
+touchResistance = high >= resistanceLevel - touchTol and high <= resistanceLevel + touchTol
+
+nearSupport = close <= supportLevel + atrValue * 0.25 and close >= supportLevel - atrValue * 0.08
+nearResistance = close >= resistanceLevel - atrValue * 0.25 and close <= resistanceLevel + atrValue * 0.08
+
+longSignal = allowLongs and bullTrend and touchSupport and nearSupport and rsiValue > 55
+shortSignal = allowShorts and bearTrend and touchResistance and nearResistance and rsiValue < 45
 
 // =========================
-// STRATEGY LOGIC
+// TRADE LOGIC
 // =========================
-if longCondition and strategy.position_size == 0
+if longSignal and strategy.position_size == 0
     strategy.entry("Long", strategy.long)
 
-if shortCondition and strategy.position_size == 0
+if shortSignal and strategy.position_size == 0
     strategy.entry("Short", strategy.short)
 
 if strategy.position_size > 0
-    longSL = strategy.position_avg_price - slAtrMult * atrValue
-    longTP = strategy.position_avg_price + tpAtrMult * atrValue
-    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+    slLong = strategy.position_avg_price - slAtrMult * atrValue
+    tpLong = strategy.position_avg_price + tpAtrMult * atrValue
+    strategy.exit("Long Exit", "Long", stop=slLong, limit=tpLong)
 
 if strategy.position_size < 0
-    shortSL = strategy.position_avg_price + slAtrMult * atrValue
-    shortTP = strategy.position_avg_price - tpAtrMult * atrValue
-    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+    slShort = strategy.position_avg_price + slAtrMult * atrValue
+    tpShort = strategy.position_avg_price - tpAtrMult * atrValue
+    strategy.exit("Short Exit", "Short", stop=slShort, limit=tpShort)
 
 // =========================
-// VISUALS - S/R LEVELS
+// VISUALS
 // =========================
 plot(showLevels ? supportLevel : na, title="Support", color=color.new(color.green, 0), linewidth=2, style=plot.style_dashed)
 plot(showLevels ? resistanceLevel : na, title="Resistance", color=color.new(color.red, 0), linewidth=2, style=plot.style_dashed)
+plot(emaFast, title="EMA Fast", color=color.new(color.orange, 0), linewidth=2)
+plot(emaSlow, title="EMA Slow", color=color.new(color.blue, 0), linewidth=2)
 
-plot(emaFast, title="Fast EMA (20)", color=color.new(color.orange, 0), linewidth=2)
-plot(emaSlow, title="Slow EMA (50)", color=color.new(color.blue, 0), linewidth=2)
-
-// =========================
-// VISUALS - CANDLE COLORING
-// =========================
 barColor = na
-if showTouchCandels
+if showTouchCandles
     if touchSupport and bullTrend
-        barColor := color.new(color.green, 80)  // Supporto toccato + trend bullish
+        barColor := color.new(color.lime, 18)
     else if touchResistance and bearTrend
-        barColor := color.new(color.red, 80)    // Resistenza toccata + trend bearish
+        barColor := color.new(color.red, 18)
     else if touchSupport
-        barColor := color.new(color.lime, 90)   // Solo supporto toccato
+        barColor := color.new(color.green, 35)
     else if touchResistance
-        barColor := color.new(color.orange, 90) // Solo resistenza toccata
-
+        barColor := color.new(color.orange, 35)
 barcolor(barColor)
 
 // =========================
-// ALERTS & SIGNALS
+// SIGNAL LABELS
 // =========================
-alertcondition(longCondition, title="Long Setup - Touch Support", message="🟢 XAUUSD 1H Long - Support Touched")
-alertcondition(shortCondition, title="Short Setup - Touch Resistance", message="🔴 XAUUSD 1H Short - Resistance Touched")
+plotshape(longSignal, title="Long S/R Touch", location=location.belowbar, style=shape.labelup, size=size.small, color=color.new(color.green, 0), text="LONG", textcolor=color.white)
+plotshape(shortSignal, title="Short S/R Touch", location=location.abovebar, style=shape.labeldown, size=size.small, color=color.new(color.red, 0), text="SHORT", textcolor=color.white)
 
-plotshape(longCondition, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.small, color=color.new(color.green, 0), text="BUY S/R", textcolor=color.white)
-plotshape(shortCondition, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.small, color=color.new(color.red, 0), text="SELL S/R", textcolor=color.white)
+alertcondition(longSignal, title="Long Setup", message="XAUUSD 1H Long - Support touched")
+alertcondition(shortSignal, title="Short Setup", message="XAUUSD 1H Short - Resistance touched")
 
 // =========================
-// TABLE INFO (Corner Display)
+// TABLE STATUS
 // =========================
 if barstate.islast
-    var table infoTable = table.new(position.top_right, 3, 4, border_color=color.gray, frame_color=color.gray, frame_width=1)
-    table.cell(infoTable, 0, 0, "XAUUSD 1H STATUS", text_color=color.white, bgcolor=color.navy)
-    table.cell(infoTable, 1, 0, "Support", text_color=color.white, bgcolor=color.navy)
-    table.cell(infoTable, 2, 0, "Resistance", text_color=color.white, bgcolor=color.navy)
+    var table t = table.new(position.top_right, 3, 4, border_color=color.gray, frame_color=color.gray, frame_width=1)
+    table.cell(t, 0, 0, "STATUS", text_color=color.white, bgcolor=color.navy)
+    table.cell(t, 1, 0, "Support", text_color=color.white, bgcolor=color.navy)
+    table.cell(t, 2, 0, "Resistance", text_color=color.white, bgcolor=color.navy)
     
-    table.cell(infoTable, 0, 1, "Current Price:", text_color=color.white, bgcolor=color.gray)
-    table.cell(infoTable, 1, 1, str.tostring(math.round(close, 2)), text_color=color.white, bgcolor=color.gray)
-    table.cell(infoTable, 2, 1, "", text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 0, 1, "Price", text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 1, 1, str.tostring(math.round(close, 2)), text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 2, 1, "", text_color=color.white, bgcolor=color.gray)
     
-    table.cell(infoTable, 0, 2, "Level:", text_color=color.white, bgcolor=color.gray)
-    table.cell(infoTable, 1, 2, str.tostring(math.round(supportLevel, 2)), text_color=color.lime, bgcolor=color.gray)
-    table.cell(infoTable, 2, 2, str.tostring(math.round(resistanceLevel, 2)), text_color=color.orange, bgcolor=color.gray)
+    table.cell(t, 0, 2, "Level", text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 1, 2, str.tostring(math.round(supportLevel, 2)), text_color=color.lime, bgcolor=color.gray)
+    table.cell(t, 2, 2, str.tostring(math.round(resistanceLevel, 2)), text_color=color.orange, bgcolor=color.gray)
     
-    table.cell(infoTable, 0, 3, "Status:", text_color=color.white, bgcolor=color.gray)
-    table.cell(infoTable, 1, 3, touchSupport ? "🟢 TOUCHED" : "---", text_color=color.lime, bgcolor=color.gray)
-    table.cell(infoTable, 2, 3, touchResistance ? "🔴 TOUCHED" : "---", text_color=color.orange, bgcolor=color.gray)
+    table.cell(t, 0, 3, "Touch", text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 1, 3, touchSupport ? "YES" : "NO", text_color=color.lime, bgcolor=color.gray)
+    table.cell(t, 2, 3, touchResistance ? "YES" : "NO", text_color=color.orange, bgcolor=color.gray)
 

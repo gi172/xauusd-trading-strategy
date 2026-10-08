@@ -1,0 +1,89 @@
+//@version=5
+strategy("XAUUSD 5M Scalping Structure + Trend Filter", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=0.75, commission_type=strategy.commission.percent, commission_value=0.04)
+
+// =========================
+// INPUTS
+// =========================
+lookback = input.int(30, "Support/Resistance Lookback", minval=10, maxval=200)
+fastEma = input.int(9, "Fast EMA", minval=5, maxval=50)
+slowEma = input.int(21, "Slow EMA", minval=10, maxval=200)
+atrLen = input.int(14, "ATR Length", minval=5, maxval=50)
+trendFilterTF = input.string("60", "Higher Timeframe Filter", options=["15", "30", "60", "240"])
+rsiLen = input.int(14, "RSI Length", minval=5, maxval=50)
+slAtrMult = input.float(1.2, "Stop Loss ATR Multiplier", minval=0.5, maxval=10.0, step=0.1)
+tpAtrMult = input.float(1.8, "Take Profit ATR Multiplier", minval=0.5, maxval=20.0, step=0.1)
+allowLongs = input.bool(true, "Allow Longs")
+allowShorts = input.bool(true, "Allow Shorts")
+showLevels = input.bool(true, "Show S/R levels")
+
+// =========================
+// HIGHER TIMEFRAME TREND FILTER
+// =========================
+higherClose = request.security(syminfo.tickerid, trendFilterTF, close)
+higherEmaFast = ta.ema(higherClose, 10)
+higherEmaSlow = ta.ema(higherClose, 30)
+higherRsi = ta.rsi(higherClose, 14)
+
+higherBullTrend = higherClose > higherEmaSlow and higherEmaFast > higherEmaSlow
+higherBearTrend = higherClose < higherEmaSlow and higherEmaFast < higherEmaSlow
+
+// =========================
+// SERIES
+// =========================
+atrValue = ta.atr(atrLen)
+emaFast = ta.ema(close, fastEma)
+emaSlow = ta.ema(close, slowEma)
+rsiValue = ta.rsi(close, rsiLen)
+
+supportLevel = ta.lowest(low, lookback)
+resistanceLevel = ta.highest(high, lookback)
+
+nearSupport = close <= supportLevel + atrValue * 0.25 and close >= supportLevel - atrValue * 0.10
+nearResistance = close >= resistanceLevel - atrValue * 0.25 and close <= resistanceLevel + atrValue * 0.10
+
+bullImpulse = close > emaFast and emaFast > emaSlow
+bearImpulse = close < emaFast and emaFast < emaSlow
+
+longCondition = allowLongs and higherBullTrend and nearSupport and bullImpulse and rsiValue > 55
+shortCondition = allowShorts and higherBearTrend and nearResistance and bearImpulse and rsiValue < 45
+
+// =========================
+// STRATEGY LOGIC
+// =========================
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+if strategy.position_size > 0
+    longSL = strategy.position_avg_price - slAtrMult * atrValue
+    longTP = strategy.position_avg_price + tpAtrMult * atrValue
+    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+
+if strategy.position_size < 0
+    shortSL = strategy.position_avg_price + slAtrMult * atrValue
+    shortTP = strategy.position_avg_price - tpAtrMult * atrValue
+    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+
+// =========================
+// VISUALS
+// =========================
+plot(showLevels ? supportLevel : na, title="Support", color=color.new(color.green, 0), linewidth=2)
+plot(showLevels ? resistanceLevel : na, title="Resistance", color=color.new(color.red, 0), linewidth=2)
+
+plot(emaFast, title="Fast EMA", color=color.new(color.orange, 0), linewidth=1)
+plot(emaSlow, title="Slow EMA", color=color.new(color.blue, 0), linewidth=1)
+
+// =========================
+// ALERTS
+// =========================
+alertcondition(longCondition, title="Long Setup", message="XAUUSD 5M Long setup")
+alertcondition(shortCondition, title="Short Setup", message="XAUUSD 5M Short setup")
+
+// =========================
+// SIGNAL SHAPES
+// =========================
+plotshape(longCondition, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.new(color.green, 0), text="BUY")
+plotshape(shortCondition, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.new(color.red, 0), text="SELL")
+

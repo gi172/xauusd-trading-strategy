@@ -1,5 +1,5 @@
 //@version=5
-strategy("XAUUSD 1H Intraday Structure + S/R", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.04)
+strategy("XAUUSD 1H Intraday - Touch S/R Visual", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.04)
 
 // =========================
 // INPUTS
@@ -12,9 +12,11 @@ rsiLen = input.int(14, "RSI Length", minval=5, maxval=50)
 atrLen = input.int(14, "ATR Length", minval=5, maxval=50)
 slAtrMult = input.float(1.5, "Stop Loss ATR Multiplier", minval=0.5, maxval=10.0, step=0.1)
 tpAtrMult = input.float(2.0, "Take Profit ATR Multiplier", minval=0.5, maxval=20.0, step=0.1)
+touchRange = input.float(0.3, "Touch Range % of ATR", minval=0.1, maxval=1.0, step=0.1)
 allowLongs = input.bool(true, "Allow Longs")
 allowShorts = input.bool(true, "Allow Shorts")
 showLevels = input.bool(true, "Show S/R levels")
+showTouchCandels = input.bool(true, "Highlight Touch Candels")
 
 // =========================
 // SERIES
@@ -32,14 +34,22 @@ lastLow = ta.lowest(low, trendLookback)
 prevLastHigh = ta.highest(high[1], trendLookback)
 prevLastLow = ta.lowest(low[1], trendLookback)
 
+// =========================
+// TOUCH DETECTION
+// =========================
+touchTolerance = atrValue * touchRange
+
+touchSupport = (low <= supportLevel + touchTolerance) and (low >= supportLevel - touchTolerance)
+touchResistance = (high >= resistanceLevel - touchTolerance) and (high <= resistanceLevel + touchTolerance)
+
 bullTrend = close > emaFast and emaFast > emaSlow and lastHigh > prevLastHigh
 bearTrend = close < emaFast and emaFast < emaSlow and lastLow < prevLastLow
 
 nearSupport = close <= supportLevel + atrValue * 0.35 and close >= supportLevel - atrValue * 0.10
 nearResistance = close >= resistanceLevel - atrValue * 0.35 and close <= resistanceLevel + atrValue * 0.10
 
-longCondition = allowLongs and bullTrend and nearSupport and rsiValue > 55 and close > emaFast
-shortCondition = allowShorts and bearTrend and nearResistance and rsiValue < 45 and close < emaFast
+longCondition = allowLongs and bullTrend and nearSupport and rsiValue > 55 and close > emaFast and touchSupport
+shortCondition = allowShorts and bearTrend and nearResistance and rsiValue < 45 and close < emaFast and touchResistance
 
 // =========================
 // STRATEGY LOGIC
@@ -61,23 +71,57 @@ if strategy.position_size < 0
     strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
 
 // =========================
-// VISUALS
+// VISUALS - S/R LEVELS
 // =========================
-plot(showLevels ? supportLevel : na, title="Support", color=color.new(color.green, 0), linewidth=2)
-plot(showLevels ? resistanceLevel : na, title="Resistance", color=color.new(color.red, 0), linewidth=2)
+plot(showLevels ? supportLevel : na, title="Support", color=color.new(color.green, 0), linewidth=2, style=plot.style_dashed)
+plot(showLevels ? resistanceLevel : na, title="Resistance", color=color.new(color.red, 0), linewidth=2, style=plot.style_dashed)
 
-plot(emaFast, title="Fast EMA", color=color.new(color.orange, 0), linewidth=1)
-plot(emaSlow, title="Slow EMA", color=color.new(color.blue, 0), linewidth=1)
-
-// =========================
-// ALERTS
-// =========================
-alertcondition(longCondition, title="Long Setup", message="XAUUSD 1H Long setup")
-alertcondition(shortCondition, title="Short Setup", message="XAUUSD 1H Short setup")
+plot(emaFast, title="Fast EMA (20)", color=color.new(color.orange, 0), linewidth=2)
+plot(emaSlow, title="Slow EMA (50)", color=color.new(color.blue, 0), linewidth=2)
 
 // =========================
-// BACKTEST INFO
+// VISUALS - CANDLE COLORING
 // =========================
-plotshape(longCondition, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.new(color.green, 0), text="BUY")
-plotshape(shortCondition, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.new(color.red, 0), text="SELL")
+barColor = na
+if showTouchCandels
+    if touchSupport and bullTrend
+        barColor := color.new(color.green, 80)  // Supporto toccato + trend bullish
+    else if touchResistance and bearTrend
+        barColor := color.new(color.red, 80)    // Resistenza toccata + trend bearish
+    else if touchSupport
+        barColor := color.new(color.lime, 90)   // Solo supporto toccato
+    else if touchResistance
+        barColor := color.new(color.orange, 90) // Solo resistenza toccata
+
+barcolor(barColor)
+
+// =========================
+// ALERTS & SIGNALS
+// =========================
+alertcondition(longCondition, title="Long Setup - Touch Support", message="🟢 XAUUSD 1H Long - Support Touched")
+alertcondition(shortCondition, title="Short Setup - Touch Resistance", message="🔴 XAUUSD 1H Short - Resistance Touched")
+
+plotshape(longCondition, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.small, color=color.new(color.green, 0), text="BUY S/R", textcolor=color.white)
+plotshape(shortCondition, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.small, color=color.new(color.red, 0), text="SELL S/R", textcolor=color.white)
+
+// =========================
+// TABLE INFO (Corner Display)
+// =========================
+if barstate.islast
+    var table infoTable = table.new(position.top_right, 3, 4, border_color=color.gray, frame_color=color.gray, frame_width=1)
+    table.cell(infoTable, 0, 0, "XAUUSD 1H STATUS", text_color=color.white, bgcolor=color.navy)
+    table.cell(infoTable, 1, 0, "Support", text_color=color.white, bgcolor=color.navy)
+    table.cell(infoTable, 2, 0, "Resistance", text_color=color.white, bgcolor=color.navy)
+    
+    table.cell(infoTable, 0, 1, "Current Price:", text_color=color.white, bgcolor=color.gray)
+    table.cell(infoTable, 1, 1, str.tostring(math.round(close, 2)), text_color=color.white, bgcolor=color.gray)
+    table.cell(infoTable, 2, 1, "", text_color=color.white, bgcolor=color.gray)
+    
+    table.cell(infoTable, 0, 2, "Level:", text_color=color.white, bgcolor=color.gray)
+    table.cell(infoTable, 1, 2, str.tostring(math.round(supportLevel, 2)), text_color=color.lime, bgcolor=color.gray)
+    table.cell(infoTable, 2, 2, str.tostring(math.round(resistanceLevel, 2)), text_color=color.orange, bgcolor=color.gray)
+    
+    table.cell(infoTable, 0, 3, "Status:", text_color=color.white, bgcolor=color.gray)
+    table.cell(infoTable, 1, 3, touchSupport ? "🟢 TOUCHED" : "---", text_color=color.lime, bgcolor=color.gray)
+    table.cell(infoTable, 2, 3, touchResistance ? "🔴 TOUCHED" : "---", text_color=color.orange, bgcolor=color.gray)
 

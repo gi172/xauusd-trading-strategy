@@ -1,0 +1,83 @@
+//@version=5
+strategy("XAUUSD 1H Intraday Structure + S/R", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.04)
+
+// =========================
+// INPUTS
+// =========================
+lookback = input.int(40, "Support/Resistance Lookback", minval=10, maxval=200)
+fastEma = input.int(20, "Fast EMA", minval=5, maxval=100)
+slowEma = input.int(50, "Slow EMA", minval=10, maxval=200)
+trendLookback = input.int(20, "Trend Structure Lookback", minval=5, maxval=100)
+rsiLen = input.int(14, "RSI Length", minval=5, maxval=50)
+atrLen = input.int(14, "ATR Length", minval=5, maxval=50)
+slAtrMult = input.float(1.5, "Stop Loss ATR Multiplier", minval=0.5, maxval=10.0, step=0.1)
+tpAtrMult = input.float(2.0, "Take Profit ATR Multiplier", minval=0.5, maxval=20.0, step=0.1)
+allowLongs = input.bool(true, "Allow Longs")
+allowShorts = input.bool(true, "Allow Shorts")
+showLevels = input.bool(true, "Show S/R levels")
+
+// =========================
+// SERIES
+// =========================
+atrValue = ta.atr(atrLen)
+emaFast = ta.ema(close, fastEma)
+emaSlow = ta.ema(close, slowEma)
+rsiValue = ta.rsi(close, rsiLen)
+
+supportLevel = ta.lowest(low, lookback)
+resistanceLevel = ta.highest(high, lookback)
+
+lastHigh = ta.highest(high, trendLookback)
+lastLow = ta.lowest(low, trendLookback)
+prevLastHigh = ta.highest(high[1], trendLookback)
+prevLastLow = ta.lowest(low[1], trendLookback)
+
+bullTrend = close > emaFast and emaFast > emaSlow and lastHigh > prevLastHigh
+bearTrend = close < emaFast and emaFast < emaSlow and lastLow < prevLastLow
+
+nearSupport = close <= supportLevel + atrValue * 0.35 and close >= supportLevel - atrValue * 0.10
+nearResistance = close >= resistanceLevel - atrValue * 0.35 and close <= resistanceLevel + atrValue * 0.10
+
+longCondition = allowLongs and bullTrend and nearSupport and rsiValue > 55 and close > emaFast
+shortCondition = allowShorts and bearTrend and nearResistance and rsiValue < 45 and close < emaFast
+
+// =========================
+// STRATEGY LOGIC
+// =========================
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+if strategy.position_size > 0
+    longSL = strategy.position_avg_price - slAtrMult * atrValue
+    longTP = strategy.position_avg_price + tpAtrMult * atrValue
+    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+
+if strategy.position_size < 0
+    shortSL = strategy.position_avg_price + slAtrMult * atrValue
+    shortTP = strategy.position_avg_price - tpAtrMult * atrValue
+    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+
+// =========================
+// VISUALS
+// =========================
+plot(showLevels ? supportLevel : na, title="Support", color=color.new(color.green, 0), linewidth=2)
+plot(showLevels ? resistanceLevel : na, title="Resistance", color=color.new(color.red, 0), linewidth=2)
+
+plot(emaFast, title="Fast EMA", color=color.new(color.orange, 0), linewidth=1)
+plot(emaSlow, title="Slow EMA", color=color.new(color.blue, 0), linewidth=1)
+
+// =========================
+// ALERTS
+// =========================
+alertcondition(longCondition, title="Long Setup", message="XAUUSD 1H Long setup")
+alertcondition(shortCondition, title="Short Setup", message="XAUUSD 1H Short setup")
+
+// =========================
+// BACKTEST INFO
+// =========================
+plotshape(longCondition, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.new(color.green, 0), text="BUY")
+plotshape(shortCondition, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.new(color.red, 0), text="SELL")
+
